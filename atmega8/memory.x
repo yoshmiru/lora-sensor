@@ -1,0 +1,5 @@
+MEMORY
+{
+  flash : ORIGIN = 0x00000000, LENGTH = 8K
+  ram   : ORIGIN = 0x00800060, LENGTH = 1K
+}

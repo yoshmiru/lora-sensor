@@ -1,0 +1,29 @@
+# --- Rust / AVR (atmega8/) ---
+atmega8/target/
+**/*.rs.bk
+
+# --- Python (rpi/) ---
+__pycache__/
+*.py[cod]
+*$py.class
+rpi/__pycache__/
+.venv/
+venv/
+env/
+.pytest_cache/
+
+# --- Nix / Direnv ---
+.direnv/
+result
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+*~
+*.swp
+
+# --- Project Specific ---
+# もしルートにも target が残っている場合はそれも除外
+target/
+Cargo.lock
