@@ -1,6 +1,20 @@
 # --- Rust / AVR (atmega8/) ---
 atmega8/target/
-**/*.rs.bk
+atmega8/Cargo.lock
+
+# --- C / AVR (atmega8-c/) ---
+atmega8-c/*.elf
+atmega8-c/*.hex
+atmega8-c/*.o
+
+# --- MicroPython / ESP32 (esp32/) ---
+esp32/__pycache__/
+esp32/.python-version
+
+# --- Cloudflare Workers (cloudflare/) ---
+cloudflare/node_modules/
+cloudflare/.wrangler/
+cloudflare/dist/
 
 # --- Python (rpi/) ---
 __pycache__/
@@ -10,11 +24,11 @@ rpi/__pycache__/
 .venv/
 venv/
 env/
-.pytest_cache/
 
 # --- Nix / Direnv ---
 .direnv/
 result
+.envrc
 
 # --- IDE / OS ---
 .vscode/
@@ -23,7 +37,6 @@ result
 *~
 *.swp
 
-# --- Project Specific ---
-# もしルートにも target が残っている場合はそれも除外
+# --- Temporary ---
 target/
 Cargo.lock
