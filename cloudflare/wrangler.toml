@@ -1,0 +1,7 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "lora-gateway-worker"
+main = "src/index.ts"
+compatibility_date = "2024-03-08"
+
+# [vars]
+# API_KEY = "your-secret-key" # 将来的にセキュリティを強化する場合に使用
