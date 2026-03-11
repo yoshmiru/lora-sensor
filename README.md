@@ -1,74 +1,49 @@
-# LoRa E220-900T22S(JP)-EV1 with ATmega8 (Rust)
+# LoRa E220 IoT System (ATmega8 to Cloudflare)
 
-このプロジェクトは、ATmega8/16PUを使用して LoRa モジュール **E220-900T22S(JP)-EV1** でデータを送受信するための Rust サンプルコードです。
+ATmega8 を送信機とし、ESP32 をゲートウェイにして Cloudflare Workers へデータを転送する IoT システムのサンプルコードです。
 
 ## 特徴
-- **透過伝送モード (Normal Mode)** を使用したシンプルなシリアル通信。
-- 送信側 (Transmitter) と受信側 (Receiver) の両方のコードを含みます。
-- `atmega-hal` を使用した Rust による組み込み実装。
+- **送信機 (ATmega8)**: C言語による軽量・安定実装。1MHz内蔵クロックで動作。
+- **ゲートウェイ (ESP32)**: MicroPython 実装。LoRa 受信データを Wi-Fi 経由でクラウドへ転送。
+- **クラウド (Cloudflare Workers)**: 受信データの処理とログ保存。
 
 ## ディレクトリ構成
-- `atmega8/`: ATmega8 用の Rust プロジェクト。
-  - `src/transmitter.rs`: 送信側プログラム。5秒ごとにメッセージを送信。
-  - `src/receiver.rs`: 受信側プログラム。データ受信時に LED (PB0) をトグル。
+- `atmega8-c/`: 送信機ソースコード (C言語)。
+- `esp32/`: ゲートウェイソースコード (MicroPython)。
+- `cloudflare/`: クラウド側ロジック (TypeScript / Wrangler)。
+- `rpi/`: ローカル受信用スクリプト (Python)。
 
-## 接続 (ATmega8 <-> E220-900T22S(JP))
+## クイックスタート
+
+### 1. 送信機の書き込み (ATmega8)
+```bash
+# ビルドと書き込みを実行
+make flash-tx
+```
+※ PB0 ピンに接続された LED が 5秒おきに点滅し、LoRa 送信が行われます。
+
+### 2. ゲートウェイの準備 (ESP32)
+1. `esp32/main.py` の `WIFI_SSID`, `WIFI_PASS`, `WORKER_URL` を編集します。
+2. ファイルを ESP32 に書き込みます。
+   ```bash
+   make esp32-deploy
+   ```
+
+### 3. モジュールの設定確認 (オプション)
+E220 モジュールが「透過伝送モード」になっていない場合は、ESP32 を使って設定を変更できます。
+```bash
+make esp32-check   # 設定確認
+make esp32-update  # 透過モードへ更新
+```
+
+## 接続図 (ATmega8 <-> E220)
 
 | E220 側 | ATmega8 側 | 備考 |
 | :--- | :--- | :--- |
-| **RXD** | **PD1 (TX)** | |
-| **TXD** | **PD0 (RX)** | |
-| **M0** | **PD2** | 送受信時は Low (GND) に固定 |
-| **M1** | **PD3** | 送受信時は Low (GND) に固定 |
-| **AUX** | **PD4** | 送信側で使用（ビジー確認用） |
-| **VCC** | **3.3V** | **注意: 5V は不可** |
-| **GND** | **GND** | |
+| **RXD** | **PD1 (3番ピン)** | UART 送信ライン |
+| **M0/M1** | **GND** | 通常モード固定 |
+| **VCC** | **3.3V** | パスコン(10uF〜)推奨 |
+| **GND** | **GND** | 共通GNDを確実に接続 |
 
-※ LED は ATmega8 の **PB0** ピンに接続してください。
-
-## ビルド方法
-
-Nix 環境（`nix develop`）または Rust AVR ツールチェーンがセットアップされた環境で実行してください。
-
-```bash
-cd atmega8
-cargo build --release -Zjson-target-spec
-```
-
-生成された ELF ファイル:
-- `atmega8/target/avr-atmega8/release/transmitter`
-- `atmega8/target/avr-atmega8/release/receiver`
-
-## 受信側 (Raspberry Pi / Python)
-
-Raspberry Pi を受信機として使用する場合、`rpi/receiver.py` を使用します。
-
-### 接続 (Raspberry Pi <-> E220-900T22S(JP))
-
-| E220 側 | Raspberry Pi 側 | 備考 |
-| :--- | :--- | :--- |
-| **RXD** | **GPIO 14 (TXD)** | 物理番号 8 番 |
-| **TXD** | **GPIO 15 (RXD)** | 物理番号 10 番 |
-| **M0/M1** | **GND** | 送受信モード (Low) |
-| **VCC** | **3.3V** | 物理番号 1 番 |
-| **GND** | **GND** | 物理番号 6 番など |
-
-### 実行方法 (Raspberry Pi)
-
-1. `pyserial` をインストールします。
-   ```bash
-   pip install pyserial
-   ```
-2. シリアルポート (`/dev/serial0`) を有効化します。
-   - `sudo raspi-config` -> `Interface Options` -> `Serial Port`
-   - **Serial Login Shell**: NO
-   - **Serial Port Hardware**: YES
-3. 受信スクリプトを実行します。
-   ```bash
-   python rpi/receiver.py
-   ```
-
-## 注意事項
-- E220 モジュールのデフォルト設定（9600bps, 透過伝送）を想定しています。
-- 日本国内で使用する場合は、電波法に適合した（技適マーク付きの）モジュールを使用し、適切なチャンネル設定を行ってください。
-- E220-900T22S(JP) は 3.3V 駆動です。ATmega8 を 5V で動作させる場合は、信号線のレベルシフト（分圧抵抗など）が必要です。
+## 免責事項
+- このコードは学習・実験用です。日本国内での運用は電波法を遵守してください。
