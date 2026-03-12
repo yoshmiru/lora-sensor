@@ -15,7 +15,7 @@
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
             python3
-            python3Packages.mpremote
+            mpremote
             esptool
           ];
 
