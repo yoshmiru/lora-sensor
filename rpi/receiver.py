@@ -1,35 +1,47 @@
 import serial
+import requests
 import time
+import json
 
-# Raspberry Pi のシリアルポート設定
-# 通常、/dev/serial0 が GPIO 14 (TX), 15 (RX) に割り当てられています。
-# 設定（raspi-config）で「シリアルコンソール」を無効化し、「シリアルハードウェア」を有効化しておく必要があります。
-PORT = '/dev/serial0'
-BAUD = 9600
+# --- 設定 ---
+# USBシリアルアダプタのポート (Windowsなら 'COM3', Linuxなら '/dev/ttyUSB0' など)
+SERIAL_PORT = '/dev/ttyUSB0'
+BAUD_RATE = 9600
+WORKER_URL = "https://lora-gateway-worker.miru.workers.dev/"
 
 def main():
     try:
         # シリアルポートの初期化
-        ser = serial.Serial(PORT, BAUD, timeout=1)
-        print(f"Starting LoRa Receiver on {PORT} at {BAUD}bps...")
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+        print("--- LoRa to Cloudflare Gateway (Python) ---")
+        print("Listening on " + SERIAL_PORT + " at " + str(BAUD_RATE) + "bps...")
 
         while True:
-            # データの受信を待機
             if ser.in_waiting > 0:
-                # E220 からのデータを受信
-                # 透過伝送モード（Normal Mode）なので、送信側が送ったバイトがそのまま届きます。
+                # データの読み取り
                 line = ser.readline().decode('utf-8', errors='replace').strip()
                 
                 if line:
-                    timestamp = time.strftime("[%Y-%m-%d %H:%M:%S]")
-                    print(f"{timestamp} Received: {line}")
+                    print("Received: " + line)
+                    
+                    # Cloudflare Workers 側の batch 仕様 (配列) に合わせて送信
+                    if line.startswith("M:"):
+                        payload = [{"message": line}]
+                        try:
+                            # タイムアウトを設定してハングアップを防止
+                            response = requests.post(WORKER_URL, json=payload, timeout=5)
+                            print("Cloudflare Response: " + str(response.status_code))
+                        except Exception as e:
+                            print("HTTP Error: " + str(e))
+                    else:
+                        print("Ignored (Invalid Format)")
 
             time.sleep(0.1)
 
     except KeyboardInterrupt:
-        print("\nReceiver stopped by user.")
+        print("\nGateway stopped.")
     except Exception as e:
-        print(f"\nError: {e}")
+        print("\nError: " + str(e))
     finally:
         if 'ser' in locals() and ser.is_open:
             ser.close()
