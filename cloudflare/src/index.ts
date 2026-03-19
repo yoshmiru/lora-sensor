@@ -3,17 +3,30 @@ export interface Env {
 	LINE_CHANNEL_ACCESS_TOKEN: string;
 }
 
+// 時刻を日本時間に変換するヘルパー関数
+function toJST(utcString: string): string {
+	// D1 の DATETIME 文字列を Date オブジェクトに変換
+	// Cloudflare 上の new Date() は UTC 扱い
+	const date = new Date(utcString + " UTC");
+	return date.toLocaleString("ja-JP", {
+		timeZone: "Asia/Tokyo",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+		second: "2-digit"
+	});
+}
+
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const signature = request.headers.get("x-line-signature");
 		const isLine = signature !== null;
 
-		// --- A. LoRa 受信処理 (ESP32 からのバッチデータ) ---
+		// --- A. LoRa 受信処理 (バッチ) ---
 		if (request.method === "POST" && !isLine) {
 			try {
 				const batch = await request.json() as any[];
-
-				// まとめて D1 に保存するための準備
 				const statements = batch.map(entry => {
 					const parts = entry.message.split(',');
 					const moistureRaw = parseInt(parts[0].split(':')[1]);
@@ -27,30 +40,29 @@ export default {
 						"INSERT INTO sensor_data (moisture, temp, humi) VALUES (?, ?, ?)"
 					).bind(moisturePercent.toFixed(1), temperature, humidity);
 				});
-
-				// 一括実行 (Batch execution)
 				await env.DB.batch(statements);
-
 				return new Response("Batch Logged", { status: 200 });
 			} catch (err) {
 				return new Response("Batch Error", { status: 400 });
 			}
 		}
 
-		// --- B. LINE Webhook 処理 (変更なし) ---
+		// --- B. LINE Webhook 処理 ---
 		if (request.method === "POST" && isLine) {
 			try {
 				const body = await request.json() as any;
 				const event = body.events[0];
 				if (!event || !event.replyToken) return new Response("OK");
 
-				let replyText = "";
 				const latest = await env.DB.prepare(
 					"SELECT * FROM sensor_data ORDER BY created_at DESC LIMIT 1"
 				).first() as any;
 
+				let replyText = "";
 				if (latest) {
-					replyText = `【現在のハウス状況】\n💧水分: ${latest.moisture}%\n🌡温度: ${latest.temp}℃\n☁湿度: ${latest.humi}%\n(計測: ${latest.created_at})`;
+					// 取得した created_at を日本時間に変換して表示
+					const timeJST = toJST(latest.created_at);
+					replyText = `【現在のハウス状況】\n💧水分: ${latest.moisture}%\n🌡温度: ${latest.temp}℃\n☁湿度: ${latest.humi}%\n(計測: ${timeJST})`;
 				} else {
 					replyText = "データがありません。";
 				}
