@@ -8,30 +8,37 @@ WIFI_SSID = "Buffalo-G-6278"
 WIFI_PASS = "4rxkndv4fva43"
 WORKER_URL = "https://lora-gateway-worker.miru.workers.dev/"
 
-# UART2 (RX=16, TX=17)
-lora_uart = machine.UART(2, baudrate=9600, rx=16, tx=17, timeout=100)
-
-# M0, M1 ピンの設定 (Normal Mode 固定)
-m0 = machine.Pin(4, machine.Pin.OUT)
-m1 = machine.Pin(5, machine.Pin.OUT)
-m0.value(0)
-m1.value(0)
+# 【安全装置】
+print("System booting in 5 seconds...")
+time.sleep(5)
 
 def connect_wifi():
-    wlan = network.WLAN(network.STA_IF)
+    wlan = network.WLAN()
     wlan.active(True)
     if not wlan.isconnected():
-        print('Connecting to WiFi...')
+        print('Connecting to WiFi...', end='')
         wlan.connect(WIFI_SSID, WIFI_PASS)
-        while not wlan.isconnected():
+        for _ in range(20):
+            if wlan.isconnected(): break
+            print('.', end='')
             time.sleep(1)
-    print("WiFi connected:", wlan.ifconfig())
+    
+    if wlan.isconnected():
+        print("\nWiFi connected:", wlan.ifconfig())
+        return True
+    return False
 
 def main():
+    # 起動時に接続を完了させておく (突入電流をここで済ませる)
     connect_wifi()
-    print("--- Batch Gateway Mode Active ---")
+    wlan = network.WLAN(network.STA_IF)
+
+    lora_uart = machine.UART(2, baudrate=9600, rx=16, tx=17, timeout=100)
+    m0 = machine.Pin(4, machine.Pin.OUT, value=0)
+    m1 = machine.Pin(5, machine.Pin.OUT, value=0)
 
     data_buffer = []
+    print("--- Gateway Running (WiFi-Always-On) ---")
 
     while True:
         if lora_uart.any():
@@ -39,21 +46,25 @@ def main():
                 line = lora_uart.readline()
                 if line:
                     data = line.decode('utf-8', 'replace').strip()
-                    if data.startswith("M:"): # 正しいデータ形式か簡易チェック
+                    if data.startswith("M:"):
                         data_buffer.append({"message": data})
-                        print("Buffered:", data)
+                        print("Buffered ({}/6): {}".format(len(data_buffer), data))
 
-                    # 6件貯まったら送信 (10秒おきなら約1分に1回)
                     if len(data_buffer) >= 6:
-                        print("Sending batch to Cloudflare...")
-                        try:
-                            response = urequests.post(WORKER_URL, json=data_buffer)
-                            print("Cloudflare Response:", response.status_code)
-                            response.close()
-                            data_buffer = [] # 成功したらバッファをクリア
-                        except Exception as e:
-                            print("HTTP Error, keeping buffer:", e)
-                            # 送信失敗時は次回復帰を待つためバッファを保持
+                        # 接続が切れていたら再接続
+                        if not wlan.isconnected():
+                            print("Reconnecting WiFi...")
+                            connect_wifi()
+
+                        if wlan.isconnected():
+                            print("Sending batch...")
+                            try:
+                                response = urequests.post(WORKER_URL, json=data_buffer)
+                                print("Response:", response.status_code)
+                                response.close()
+                                data_buffer = []
+                            except Exception as e:
+                                print("POST Error:", e)
             except Exception as e:
                 print("Read Error:", e)
 
