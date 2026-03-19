@@ -8,9 +8,10 @@
 #include <avr/wdt.h>
 #include <stdio.h>
 
+// カウンタ (リセット後も保持)
 uint8_t sleep_count __attribute__ ((section (".noinit")));
 
-// --- UART & ADC ---
+// --- UART & ADC & I2C ---
 void uart_init(void) {
     UCSRA = (1 << U2X); UBRRH = 0; UBRRL = 12;
     UCSRC = (1 << URSEL) | (3 << UCSZ0); UCSRB = (1 << TXEN);
@@ -23,8 +24,6 @@ uint16_t adc_read(uint8_t ch) {
     ADMUX = (ADMUX & 0xF0) | (ch & 0x07); ADCSRA |= (1 << ADSC);
     while (ADCSRA & (1 << ADSC)); return ADC;
 }
-
-// --- I2C (安全版) ---
 uint8_t i2c_wait(void) {
     uint16_t timeout = 2000;
     while (!(TWCR & (1 << TWINT))) { if (--timeout == 0) return 1; }
@@ -54,35 +53,50 @@ uint8_t aht25_read(float *temp, float *humi) {
 }
 
 int main(void) {
+    // 1. リセット理由の保存とWDT解除
+    uint8_t mcusr_copy = MCUSR;
     MCUSR = 0;
     wdt_disable();
 
     DDRB |= (1 << PB0); // LED
-    DDRD |= (1 << PD2) | (1 << PD3); // LoRa Mode
-    DDRC |= (1 << PC1); // Moisture Sensor Power
 
-    if (sleep_count > 5) sleep_count = 0;
-
-    if (sleep_count > 0 && sleep_count < 5) {
-        PORTD |= (1 << PD2) | (1 << PD3); // LoRa Sleep
-        PORTC &= ~(1 << PC1);             // Moisture Sensor Power OFF
-
-        PORTB |= (1 << PB0); _delay_ms(2); PORTB &= ~(1 << PB0); // Heartbeat
-
+    if (mcusr_copy & (1 << WDRF)) {
         sleep_count++;
+    } else {
+        sleep_count = 0;
+        // 電源ON/リセット時のみ3回点滅
+        for(int i=0; i<3; i++) {
+            PORTB |= (1 << PB0); _delay_ms(30);
+            PORTB &= ~(1 << PB0); _delay_ms(30);
+        }
+    }
+
+    // 2. スリープ管理 (約10秒)
+    if (sleep_count > 0 && sleep_count < 5) {
+        DDRD |= (1 << PD2) | (1 << PD3);
+        PORTD |= (1 << PD2) | (1 << PD3); // LoRa Sleep
+        DDRC |= (1 << PC1);
+        PORTC &= ~(1 << PC1);             // Sensor Power OFF
+        
+        // ハートビート
+        PORTB |= (1 << PB0); _delay_ms(2); PORTB &= ~(1 << PB0);
+
         wdt_enable(WDTO_2S);
         set_sleep_mode(SLEEP_MODE_PWR_DOWN);
         sleep_mode();
     }
-
+    
+    // 3. 送信シーケンス
     sleep_count = 1;
 
-    // --- Wakeup ---
-    PORTD &= ~((1 << PD2) | (1 << PD3)); // LoRa Normal
-    PORTC |= (1 << PC1);                 // Moisture Sensor Power ON
-    _delay_ms(100); // 復帰待ち
+    // 起床初期化
+    DDRD |= (1 << PD2) | (1 << PD3);
+    PORTD &= ~((1 << PD2) | (1 << PD3)); // LoRa Wakeup
+    DDRC |= (1 << PC1);
+    PORTC |= (1 << PC1);                 // Sensor ON
+    _delay_ms(200); // 起動時間をたっぷり確保
 
-    PORTB |= (1 << PB0);
+    PORTB |= (1 << PB0); // 送信中 LED ON
 
     uart_init();
     adc_init();
@@ -95,14 +109,23 @@ int main(void) {
     char buffer[64];
     sprintf(buffer, "M:%u,T:%.1f,H:%.1f\r\n", moisture, (double)temp, (double)humi);
     uart_putstr(buffer);
+    
+    // 送信完了待ちの徹底
+    UCSRA |= (1 << TXC);
+    while (!(UCSRA & (1 << TXC))); // マイコンのUART終了
+    
+    _delay_ms(10); 
+    DDRD &= ~(1 << PD4); 
+    while (!(PIND & (1 << PD4)));  // LoRaの無線送信終了
 
-    while (!(UCSRA & (1 << TXC)));
+    // 【ダメ押し】さらに 100ms 待つ！
+    _delay_ms(100);
 
-    PORTB &= ~(1 << PB0);
+    PORTB &= ~(1 << PB0); // LED OFF
 
-    // --- Sleep Preparation ---
+    // 就寝
     PORTD |= (1 << PD2) | (1 << PD3); // LoRa Sleep
-    PORTC &= ~(1 << PC1);             // Moisture Sensor Power OFF
+    PORTC &= ~(1 << PC1);             // Sensor OFF
     ADCSRA &= ~(1 << ADEN); TWCR &= ~(1 << TWEN); UCSRB &= ~(1 << TXEN);
 
     wdt_enable(WDTO_2S);
