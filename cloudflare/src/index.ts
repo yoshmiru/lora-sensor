@@ -3,10 +3,11 @@ export interface Env {
 	LINE_CHANNEL_ACCESS_TOKEN: string;
 }
 
-// 時刻を日本時間に変換するヘルパー関数
+// 確定したキャリブレーション値
+const DRY_VAL = 593;
+const WET_VAL = 273;
+
 function toJST(utcString: string): string {
-	// D1 の DATETIME 文字列を Date オブジェクトに変換
-	// Cloudflare 上の new Date() は UTC 扱い
 	const date = new Date(utcString + " UTC");
 	return date.toLocaleString("ja-JP", {
 		timeZone: "Asia/Tokyo",
@@ -23,7 +24,7 @@ export default {
 		const signature = request.headers.get("x-line-signature");
 		const isLine = signature !== null;
 
-		// --- A. LoRa 受信処理 (バッチ) ---
+		// --- A. LoRa 受信処理 ---
 		if (request.method === "POST" && !isLine) {
 			try {
 				const batch = await request.json() as any[];
@@ -33,7 +34,8 @@ export default {
 					const temperature = parseFloat(parts[1].split(':')[1]);
 					const humidity = parseFloat(parts[2].split(':')[1]);
 
-					let moisturePercent = ((559 - moistureRaw) / (559 - 233)) * 100;
+					// 水分量パーセント計算 (593 -> 0%, 273 -> 100%)
+					let moisturePercent = ((DRY_VAL - moistureRaw) / (DRY_VAL - WET_VAL)) * 100;
 					moisturePercent = Math.max(0, Math.min(100, moisturePercent));
 
 					return env.DB.prepare(
@@ -60,7 +62,6 @@ export default {
 
 				let replyText = "";
 				if (latest) {
-					// 取得した created_at を日本時間に変換して表示
 					const timeJST = toJST(latest.created_at);
 					replyText = `【現在のハウス状況】\n💧水分: ${latest.moisture}%\n🌡温度: ${latest.temp}℃\n☁湿度: ${latest.humi}%\n(計測: ${timeJST})`;
 				} else {
